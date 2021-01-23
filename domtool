@@ -1,0 +1,99 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
+	exit 1
+fi
+
+usage(){
+	printf "Usage:\n"
+	printf "  domtool [OPTION] [arguments...]\n\n"
+	printf "Options:\n"
+	printf "    [-e|--erase|erase] <DOMU>     Delete <DOMU>, removing configs and destroying disks\n"
+}
+
+check_exist(){
+	DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
+	CFG="$(find /etc/xen/*.cfg|grep -w "$1")"
+	LVM="$(find /dev/vg0/*-{disk,swap}|grep -w "$1")"
+	if [ -z "$DOM" ] || [ -z "$CFG" ] || [ -z "$LVM" ];then
+		echo 0
+		return
+	fi
+	echo 1
+}
+
+erase_dom(){
+	if [ -z "$1" ];then
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool [-e|--erase|erase] <DOMU>\n"
+		exit 1
+	fi
+	if [ "$(check_exist "$1")" == "1" ];then
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU specified not found\n"
+		exit 1
+	fi
+	printf "\e[38;2;255;0;0m[!]\e[0m This will irreversibly delete data.\n"
+	printf "Are you sure you want to completely erase %s [yes/no]? " "$1"
+	read -r DELETE
+	if [ "$DELETE" == "y" ] || [ "$DELETE" == "Y" ];then
+		printf "Please type \"yes\": "
+		read -r DELETE
+	fi
+	if [ "$DELETE" == "yes" ];then
+		# If DOMU is running, kill it
+		DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
+		if [ -n "$DOM" ];then
+			printf "\e[38;2;0;255;0m[+]\e[0m Destroying %s\n" "$1"
+			# xl destroy "$1"
+			# COUNTER=0
+			# while [[ $DOM == *"$1"* ]];do
+			# 	DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
+			# 	sleep 1
+			# 	COUNTER=$((COUNTER + 1))
+			# 	if [ $COUNTER -gt 300 ];then
+			# 		printf "\e[38;2;255;0;0m[!]\e[0m %s Failed to shut down in a timely manner\n" "$1"
+			# 		printf "\e[38;2;255;0;0m[!]\e[0m Destroying %s\n" "$1"
+			# 		xl destroy "$1"
+			# 		break
+			# 	fi
+			# done
+		fi
+		# If DOMU has a config file, delete it
+		CFG="$(find /etc/xen/*.cfg|grep -w "$1")"
+		if [ -n "$CFG" ];then
+			printf "\e[38;2;0;255;0m[+]\e[0m Removing Config\n"
+			# rm -rf /etc/xen/"$1".cfg
+		fi
+		# If DOMU has partitions on the drive, remove them
+		LVM="$(find /dev/vg0/*-{disk,swap}|grep -w "$1")"
+		if [ -n "$LVM" ];then
+			printf "\e[38;2;0;255;0m[+]\e[0m Deleting Drives\n"
+			# umount /dev/vg0/"$1"-swap
+			# umount /dev/vg0/"$1"-disk
+			# sleep 1
+			# lvchange -an /dev/vg0/"$1"-swap
+			# lvchange -an /dev/vg0/"$1"-disk
+			# sleep 1
+			# lvremove /dev/vg0/"$1"-swap -y
+			# lvremove /dev/vg0/"$1"-disk -y
+		fi
+	else
+		printf "\e[38;2;0;255;0m[+]\e[0m Not removing %s\n" "$1"
+	fi
+	printf "\e[38;2;0;255;0m[+]\e[0m Done\n"
+	exit
+}
+
+
+
+
+
+
+while [ $# -gt 0 ];do
+	case "$1" in
+		-e|--erase|erase) shift;		erase_dom "$@"			;;
+		* )							usage					;;
+	esac
+	shift
+done
+exit
