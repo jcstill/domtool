@@ -1,0 +1,181 @@
+#!/bin/bash
+
+DAYSTHRESH=15
+DEVICE="$1"
+NAME="$2"
+
+if [ "$HOSTNAME" != "vm-host" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is meant to be run on \"vm-host\"\n"
+	exit 1
+fi
+if [ "$EUID" -ne 0 ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
+	exit 1
+fi
+if [ -z "$DEVICE" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
+	exit 1
+fi
+if [ -z "$NAME" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
+	exit 1
+fi
+TMP="$(udevadm info --query=all --name="$DEVICE" 2> /dev/null|grep "N:")"
+if [ -z "$TMP" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s Does not exist on the system\n" "$DEVICE"
+	exit 1
+fi
+TMP="$(lsblk --ascii --fs "$DEVICE"|head -2|tail -1|grep crypto_LUKS|awk '{print $1}'|tr -d '`-')"
+if [ -z "$TMP" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s not a LUKS encrypted device\n" "$DEVICE"
+	exit 1
+fi
+
+exiter(){
+	printf "\e[38;2;0;255;0m[+]\e[0m Exiting\n"
+	exit "$1"
+}
+sigint() {
+	>&2 printf "\r\e[38;2;255;0;0m[!]\e[0m SIGINT caught\n"
+	cleaner
+	exiter 1
+}
+cleaner(){
+	#Added Sleeps here to give time to umount and such (I may have to add -l to umount, but who knows)
+	printf "\e[38;2;0;255;255m [-]\e[0m Cleaning up mounted directories\n"
+	sync 2> /dev/null
+	sleep 1
+	umount /media/tmp 2> /dev/null
+	sleep 1
+	lvchange -an /dev/vg0/tmplvm 2> /dev/null
+	sleep 1
+	lvremove /dev/vg0/tmplvm -y 2> /dev/null
+	sleep 1
+	umount /media/backupspot 2> /dev/null
+	sleep 1
+	vgchange -a n /dev/"$NAME"vg 2> /dev/null
+	sleep 1
+	cryptsetup luksClose "$NAME" 2> /dev/null
+	printf "\e[38;2;0;255;255m [-]\e[0m Done\n"
+}
+end(){
+	sleep 1
+	echo "poweroff drive"
+	# udisksctl power-off -b "$DEVICE"
+}
+
+trap 'sigint' SIGINT
+cryptsetup luksOpen "$DEVICE" "$NAME"
+STARTTIME="$(date +%s)"
+printf "\e[38;2;0;255;0m[+]\e[0m Setting up script\n"
+sleep 5
+mkdir -p /media/backupspot
+umount -l /media/backupspot 2> /dev/null
+printf "\e[38;2;0;255;255m [-]\e[0m Mounting %s on /media/backupspot\n" "$NAME"
+mount /dev/"$NAME"vg/"$NAME"lv /media/backupspot
+TMP="$(lsblk|grep /media/backupspot)"
+if [ -z "$TMP" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Drive not mounted. Mount on /media/backupspot\n"
+	cleaner
+	exiter 1
+fi
+
+LATESTBACKUP="$(find /media/backupspot/* -maxdepth 0 -type d|while read -r dir;do TIME="$(echo "$dir"|cut -c19-|sed -r 's/./&\//4'|sed 's/./&\//7'|sed 's/./& /10'|sed 's/./&:/13')";date -d "$TIME" +%s;done|sort -rn|head -1)"
+DAYSSINCE="$(echo "$(date +%s)" "$LATESTBACKUP"|awk '{printf "%f\n", ($1 - $2)/86400}'|tr '.' ' '|awk '{print $1}')"
+if [ "$DAYSSINCE" -gt $DAYSTHRESH ];then
+	BACKUPDIR="$(date +%Y%m%d%H00)"
+else
+	BACKUPDIR="$(date -d @"$LATESTBACKUP" +%Y%m%d%H00)"
+fi
+mkdir -p /media/backupspot/"$BACKUPDIR"
+
+
+
+
+
+
+
+echo "making /media/backupspot/$BACKUPDIR"
+read -p "continue? " CONT
+
+
+
+
+
+
+printf "\e[38;2;0;255;255m [-]\e[0m Creating temporary filesystem\n"
+lvcreate -L 500G -n tmplvm vg0 --wipesignatures y 2> /dev/null
+mkfs.ext4 /dev/vg0/tmplvm -F 2> /dev/null
+mkdir -p /media/tmp
+printf "\e[38;2;0;255;255m [-]\e[0m Mounting temporary filesystem\n"
+mount /dev/vg0/tmplvm /media/tmp
+DOMS="$(xl list | awk '{if(NR>2)print $1}')"
+printf "\e[38;2;0;255;0m[+]\e[0m Start backup\n"
+for i in $DOMS;do
+	printf "\e[38;2;0;255;255m [-]\e[0m %s:\n" "$i"
+	cd /
+	xl shutdown "$i" 2> /dev/null
+	printf "\e[38;2;0;0;255m  [*]\e[0m %s Shutting Down\n" "$i"
+	COUNTER=0
+	UP="$(xl list | awk '{if(NR>2)print $1}' | grep "$i")"
+	while [[ $UP == *"$i"* ]];do
+		UP="$(xl list | awk '{if(NR>2)print $1}' | grep "$i")"
+		sleep 1
+		COUNTER=$((COUNTER + 1))
+		if [ $COUNTER -gt 300 ];then
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s Failed to shut down in a timely manner\n" "$i"
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m Destroying %s\n" "$i"
+			xl destroy "$i"
+			break
+		fi
+	done
+	printf "\e[38;2;0;0;255m  [*]\e[0m %s is down\n" "$i"
+	mount /dev/vg0/"$i"-disk /mnt/
+	printf "\e[38;2;0;0;255m  [*]\e[0m Backing up %s\n" "$i"
+	mkdir -p /media/tmp/"$i"
+	rsync -aAX --exclude={"dev/*","proc/*","sys/*","tmp/*","run/*","mnt/*","media/*","lost+found","swap.img"} /mnt/ /media/tmp/"$i"
+	umount /mnt
+	printf "\e[38;2;0;0;255m  [*]\e[0m Reactivating vm %s\n" "$i"
+	xl create /etc/xen/"$i".cfg 2> /dev/null
+	# Need to check if vm actually started here:
+
+	if [ ! -d "/media/tmp/$i" ]; then
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m Could not cd to \"/media/tmp/%s\". Exiting.\n" "$i"
+		cleaner
+		exiter 1
+	fi
+	cd /media/tmp/"$i" 2>/dev/null|| exiter
+	printf "\e[38;2;0;0;255m  [*]\e[0m Compressing %s data to %s on /media/backupspot/$BACKUPDIR\n" "$i" "$DEVICE"
+	tar -czf /media/backupspot/"$BACKUPDIR"/"$i".tar.gz -- *
+	touch -am /media/backupspot/"$BACKUPDIR"/"$i".tar.gz
+	if [ "$(du /media/backupspot/"$BACKUPDIR"/"$i".tar.gz | awk '{print $1}')" -gt 200000000 ];then
+		# Should remove the source for the tarball here to save space. (check that it copied completely and then remove it)
+		cd /media/tmp 2>/dev/null|| exiter
+		mkdir empty_dir
+		rsync -a --delete empty_dir/ "$i"/
+		rm -rf empty_dir "$i"
+	fi
+done
+printf "\e[38;2;0;255;255m [-]\e[0m vmhost\n"
+mkdir -p /media/tmp/vmhost
+printf "\e[38;2;0;0;255m  [*]\e[0m Backing up vmhost\n"
+rsync -aAX / --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found","/swap.img"} /media/tmp/vmhost
+if [ ! -d "/media/tmp/vmhost" ]; then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Could not cd to /media/tmp/vmhost. Exiting.\n"
+	cleaner
+	exiter 1
+fi
+cd /media/tmp/vmhost 2>/dev/null|| exiter
+printf "\e[38;2;0;0;255m  [*]\e[0m Compressing vmhost data to %s on /media/backupspot/$BACKUPDIR\n" "$DEVICE"
+tar -czf /media/backupspot/"$BACKUPDIR"/vmhost.tar.gz -- *
+printf "\e[38;2;0;255;0m[+]\e[0m End Backup\n"
+cleaner
+end
+printf "\e[38;2;0;255;255m [-]\e[0m Updating VMs\n"
+/home/jacob/xentools/updatehost --no-verbose
+ENDTIME="$(date +%s)"
+TOTALTIME=$((ENDTIME-STARTTIME))
+TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
+printf "\e[38;2;0;255;0m[+]\e[0m Script Time: %s\n" "$TOTALTIME"
+exiter 0

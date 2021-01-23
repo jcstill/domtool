@@ -1,0 +1,15 @@
+#!/bin/bash
+if [ "$EUID" -ne 0 ];then
+        >&2 printf "Please run as root\n"
+        exit
+fi
+xl sched-credit -d testsde -w 256
+xl sched-credit -d giteatest -w 256
+xl sched-credit -d uctl -w 256
+xl sched-credit -d vpn -w 256
+xl sched-credit -d nassrv -w 512
+xl sched-credit -d zabbix -w 512
+xl sched-credit -d Domain-0 -w 1024
+if [ -z $1 ];then
+	xl sched-credit
+fi

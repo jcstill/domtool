@@ -1,0 +1,28 @@
+#!/bin/bash
+killall nmap
+nmap -sP 192.168.1.0/24 >/dev/null &
+
+echo "sda:" > sdX.tmp
+smartctl -A /dev/sda | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' >> sdX.tmp
+echo "sdb:" >> sdX.tmp
+smartctl -A /dev/sdb | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' >> sdX.tmp
+echo "sdc:" >> sdX.tmp
+smartctl -A /dev/sdc | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' >> sdX.tmp
+echo "sdd:" >> sdX.tmp
+smartctl -A /dev/sdd | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' >> sdX.tmp
+stty sane
+[ -e IP.tmp ] && rm IP.tmp
+VMS=($(xl list | awk '{print $1}' | sed -n '1!p' | sed -n '1!p'))
+LINES="$(xl list | awk '{print $1}' | sed -n '1!p' | sed -n '1!p' | wc -l)"
+for (( c=0; c<$LINES; c++ ));do
+	echo -n ${VMS[$c]} >> IP.tmp
+	MAC="$(xl network-list ${VMS[$c]} | awk '{print $3}' | sed -n '1!p')"
+	IP="$(arp -an | grep $MAC | awk '{print $2}' | sed 's/[()]//g')"
+	printf "\t| $IP | $MAC\n" >> IP.tmp
+done
+iostat -dmN | grep vg0 | tr -s ' ' > DiskIO.tmp
+cat sdX.tmp
+cat IP.tmp
+cat DiskIO.tmp
+
+

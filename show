@@ -1,0 +1,59 @@
+#!/bin/bash
+sudo smartctl -A /dev/sda | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' > sda.tmp
+sudo smartctl -A /dev/sdb | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' > sdb.tmp
+sudo smartctl -A /dev/sdc | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' > sdc.tmp
+sudo smartctl -A /dev/sdd | grep 'Raw_Read_Error_Rate\|Spin_Up_Time\|Start_Stop_Count\|Reallocated_Sector_Ct\|Seek_Error_Rate\|Power_On_Hours\|Spin_Retry_Count\|Power_Cycle_Count\|End-to-End_Error\|Reported_Uncorrect\|Command_Timeout\|High_Fly_Writes\|Airflow_Temperature_Cel\|G-Sense_Error_Rate\|Power-Off_Retract_Count\|Load_Cycle_Count\|Temperature_Celsius\|Current_Pending_Sector\|Offline_Uncorrectable\|UDMA_CRC_Error_Count\|Head_Flying_Hours\|Total_LBAs_Written\|Total_LBAs_Read' > sdd.tmp
+AHeads=($(cat sda.tmp | awk '{print $2}'))
+Adata=($(cat sda.tmp | awk '{print $10}'))
+BHeads=($(cat sdb.tmp | awk '{print $2}'))
+Bdata=($(cat sdb.tmp | awk '{print $10}'))
+CHeads=($(cat sdc.tmp | awk '{print $2}'))
+Cdata=($(cat sdc.tmp | awk '{print $10}'))
+DHeads=($(cat sdd.tmp | awk '{print $2}'))
+Ddata=($(cat sdd.tmp | awk '{print $10}'))
+rm sda.tmp sdb.tmp sdc.tmp sdd.tmp
+BOOT="$(lsblk | grep part | tr '└─├' ' ' | awk '{print $1}' | cut -c3 | sort | uniq -c | grep 2 | awk '{print $2}')"
+if [ $BOOT == 'a' ];then
+	LINES=${#AHeads[@]}
+elif [ $BOOT == 'b' ];then
+	LINES=${#BHeads[@]}
+elif [ $BOOT == 'c' ];then
+	LINES=${#CHeads[@]}
+elif [ $BOOT == 'd' ];then
+	LINES=${#DHeads[@]}
+fi
+printf "%10s %10s %10s %10s %s\n" sda sdb sdc sdd raw_attr
+for (( c=0; c<=$LINES; c++ ));do
+	printf "%10s %10s %10s %10s %s\n" ${Adata[$c]} ${Bdata[$c]} ${Cdata[$c]} ${Ddata[$c]} ${CHeads[$c]}
+done
+
+nmap -sP 192.168.1.0/24 >/dev/null &
+echo "VMs:"
+VMS=($(xl list | awk '{print $1}' | sed -n '1!p' | sed -n '1!p'))
+LINES="$(xl list | awk '{print $1}' | sed -n '1!p' | sed -n '1!p' | wc -l)"
+for (( c=0; c<$LINES; c++ ));do
+	echo -n ${VMS[$c]}
+	MAC="$(xl network-list ${VMS[$c]} | awk '{print $3}' | sed -n '1!p')"
+	IP="$(arp -an | grep $MAC | awk '{print $2}' | sed 's/[()]//g')"
+	printf "\t| $IP | $MAC\n"
+done
+echo
+
+
+printf "Device\t\t    ttps   MB_r/s MB_w/s MB_d/s MB_r   MB_w     MB_d\n"
+IOS=($(iostat -dmN | grep vg0 | tr -s ' ' | tr '\n\r' ' '))
+LINES="$(iostat -dmN | grep vg0 | tr -s ' ' | wc -l )"
+for (( c=0; c<=$LINES; c++ ));do
+	printf "%17s" ${IOS[$(((c*8)+0))]}
+	printf "%7s" ${IOS[$(((c*8)+1))]}
+	printf "%7s" ${IOS[$(((c*8)+2))]}
+	printf "%7s" ${IOS[$(((c*8)+3))]}
+	printf "%7s" ${IOS[$(((c*8)+4))]}
+	printf "%7s" ${IOS[$(((c*8)+5))]}
+	printf "%7s" ${IOS[$(((c*8)+6))]}
+	printf "%7s" ${IOS[$(((c*8)+7))]}
+	printf "\n"
+done
+
+stty sane
+#reset
