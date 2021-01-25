@@ -1,22 +1,22 @@
 #!/bin/bash
+# shellcheck source=/dev/null
+# shellcheck disable=SC2034,SC2129
 
-if [ "$EUID" -ne 0 ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
-	exit 1
-fi
 
 usage(){
 	printf "Usage:\n"
 	printf "  domtool [OPTION] [arguments...]\n\n"
 	printf "Options:\n"
-	printf "    [-e|--erase|erase] <DOMU>     Delete <DOMU>, removing configs and destroying disks\n"
+	printf "    -e,--erase,erase <DOMU>         Delete <DOMU>, removing configs and destroying disks\n"
+	printf "    -n,--new,new <CONFIG>           Create new DOMU from <CONFIG>\n"
+	exit
 }
 
 check_exist(){
 	DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 	CFG="$(find /etc/xen/*.cfg|grep -w "$1")"
 	LVM="$(find /dev/vg0/*-{disk,swap}|grep -w "$1")"
-	if [ -z "$DOM" ] || [ -z "$CFG" ] || [ -z "$LVM" ];then
+	if [ -n "$DOM" ] || [ -n "$CFG" ] || [ -n "$LVM" ];then
 		echo 0
 		return
 	fi
@@ -25,7 +25,7 @@ check_exist(){
 
 erase_dom(){
 	if [ -z "$1" ];then
-		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool [-e|--erase|erase] <DOMU>\n"
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool -e,--erase,erase <DOMU>\n"
 		exit 1
 	fi
 	if [ "$(check_exist "$1")" == "1" ];then
@@ -39,61 +39,139 @@ erase_dom(){
 		printf "Please type \"yes\": "
 		read -r DELETE
 	fi
+	STARTTIME="$(date +%s)"
 	if [ "$DELETE" == "yes" ];then
 		# If DOMU is running, kill it
 		DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
 		if [ -n "$DOM" ];then
 			printf "\e[38;2;0;255;0m[+]\e[0m Destroying %s\n" "$1"
-			# xl destroy "$1"
-			# COUNTER=0
-			# while [[ $DOM == *"$1"* ]];do
-			# 	DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
-			# 	sleep 1
-			# 	COUNTER=$((COUNTER + 1))
-			# 	if [ $COUNTER -gt 300 ];then
-			# 		printf "\e[38;2;255;0;0m[!]\e[0m %s Failed to shut down in a timely manner\n" "$1"
-			# 		printf "\e[38;2;255;0;0m[!]\e[0m Destroying %s\n" "$1"
-			# 		xl destroy "$1"
-			# 		break
-			# 	fi
-			# done
+			xl destroy "$1"
+			COUNTER=0
+			while [[ $DOM == *"$1"* ]];do
+				DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
+				sleep 1
+				COUNTER=$((COUNTER + 1))
+				if [ $COUNTER -gt 300 ];then
+					printf "\e[38;2;255;0;0m[!]\e[0m %s Failed to shut down in a timely manner\n" "$1"
+					printf "\e[38;2;255;0;0m[!]\e[0m Destroying %s\n" "$1"
+					xl destroy "$1"
+					break
+				fi
+			done
 		fi
 		# If DOMU has a config file, delete it
 		CFG="$(find /etc/xen/*.cfg|grep -w "$1")"
 		if [ -n "$CFG" ];then
 			printf "\e[38;2;0;255;0m[+]\e[0m Removing Config\n"
-			# rm -rf /etc/xen/"$1".cfg
+			rm -rf /etc/xen/"$1".cfg
 		fi
 		# If DOMU has partitions on the drive, remove them
 		LVM="$(find /dev/vg0/*-{disk,swap}|grep -w "$1")"
 		if [ -n "$LVM" ];then
 			printf "\e[38;2;0;255;0m[+]\e[0m Deleting Drives\n"
-			# umount /dev/vg0/"$1"-swap
-			# umount /dev/vg0/"$1"-disk
-			# sleep 1
-			# lvchange -an /dev/vg0/"$1"-swap
-			# lvchange -an /dev/vg0/"$1"-disk
-			# sleep 1
-			# lvremove /dev/vg0/"$1"-swap -y
-			# lvremove /dev/vg0/"$1"-disk -y
+			umount /dev/vg0/"$1"-swap
+			umount /dev/vg0/"$1"-disk
+			sleep 1
+			lvchange -an /dev/vg0/"$1"-swap
+			lvchange -an /dev/vg0/"$1"-disk
+			sleep 1
+			lvremove /dev/vg0/"$1"-swap -y
+			lvremove /dev/vg0/"$1"-disk -y
 		fi
 	else
 		printf "\e[38;2;0;255;0m[+]\e[0m Not removing %s\n" "$1"
 	fi
 	printf "\e[38;2;0;255;0m[+]\e[0m Done\n"
+	ENDTIME="$(date +%s)"
+	TOTALTIME=$((ENDTIME-STARTTIME))
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
+	printf "\e[38;2;0;255;0m[+]\e[0m Script Time: %s\n" "$TOTALTIME"
 	exit
+}
+
+new_dom(){
+	if [ -z "$1" ];then
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool -n,--new,new <CONFIG>\n"
+		exit 1
+	fi
+	source "$1" 2> /dev/null
+	if [ -z "$DOMNAME" ] || [ -z "$DIST" ] || [ -z "$LVM" ] || [ -z "$IP" ] || [ -z "$GATEWAY" ] || [ -z "$NETMASK" ] || [ -z "$NAMESERVER" ] || [ ! -f "$1" ];then
+		printf "\e[38;2;255;0;0m[!]\e[0m Error not all parameters set in config file.\n"
+		printf "Required Parameters:\n"
+		printf "    DOMNAME\n    DIST\n    LVM\n    IP\n    GATEWAY\n    NETMASK\n    NAMESERVER\n"
+		printf "Optional Parameters:\n"
+		printf "    VCPUS         1 default\n    MEMORY        1gb default\n    SIZE          15gb default\n    SWAP          2gb default\n    CREDIT        256 default\n\n"
+		printf "should I create a template in %s? [y/n] " "$1"
+		read -r template
+		if [ "$template" == "y" ];then
+			printf "writing config\n"
+			printf "# General:\nDOMNAME=\nDIST=\nVCPUS=1\nMEMORY=1gb\n\n" > "$1"
+			printf "# Networking:\nIP=\nGATEWAY=\nNETMASK=\nNAMESERVER=\n\n" >> "$1"
+			printf "# Storage:\nLVM=vg0\nSIZE=15gb\nSWAP=2gb\n\n" >> "$1"
+			printf "# Credit Scheduler\nCREDIT=256\n" >> "$1"
+			
+		fi
+		return
+	fi
+	STARTTIME="$(date +%s)"
+	xen-create-image --hostname="$DOMNAME" --memory="$MEMORY" --vcpus="$VCPUS" --size="$SIZE" --swap="$SWAP" --dist="$DIST" --ip="$IP" --gateway="$GATEWAY" --netmask="$NETMASK" --nameserver="$NAMESERVER" --lvm="$LVM" --noboot
+	if [ ! -f /etc/xen/"$DOMNAME".cfg ];then
+		printf "\e[38;2;255;0;0m[!]\e[0m /etc/xen/%s.cfg doesn't exist. xen-create-image must have failed. exiting.\n" "$DOMNAME"
+		rm -rf ./tmp.cfg
+		exit
+	fi
+	cp /etc/xen/"$DOMNAME".cfg ./tmp.cfg
+	TYPE="$(grep -n type < ./tmp.cfg)"
+	if [[ -z $TYPE ]];then
+		sed -i "s/bootloader = 'pygrub'/type=\n\nbootloader = 'pygrub'/" ./tmp.cfg
+	fi
+	sed -i "$(grep -n type < ./tmp.cfg | tr ':' ' ' | awk '{print $1}')s/.*/type= 'pvh'/" ./tmp.cfg
+	MAC="$(printf '%02X:%s\n' "$(( $(printf '%d\n' $((16#$(openssl rand -hex 1)))) & 254 ))" "$(openssl rand -hex 5 | sed 's/\(..\)/\1:/g; s/:$//')" | sed -e 's/\(.*\)/\U\1/')"
+	IP="$(grep vif < ./tmp.cfg | tr "'" ' ' | tr ',[]' '\n' | grep ip | awk '{print $1}')"
+	REP="vif = [ '$IP, mac=$MAC, bridge=xenbr0' ]"
+	sed -i "$(grep -n vif < ./tmp.cfg | tr ':' ' ' | awk '{print $1}')s/.*/$REP/" ./tmp.cfg
+	cp ./tmp.cfg /etc/xen/"$DOMNAME".cfg
+	RTPASS="$(grep "Root Password" < /var/log/xen-tools/"$DOMNAME".log | awk '{print $4}')"
+	printf "\e[38;2;0;255;0m[+]\e[0m Root Password: %s\n" "$RTPASS"
+
+	xl create -q /etc/xen/"$DOMNAME".cfg 2>/dev/null
+
+	IP="$(echo "$IP" | tr '=' ' ' | awk '{print $2}')"
+	DOMU="$(ping -c 1 -q "$IP" | grep transmitted | awk '{print $4}')"
+	while [ "$DOMU" -ne 1 ];do
+		DOMU="$(ping -c 1 -q "$IP" | grep transmitted | awk '{print $4}')"
+		sleep 1
+	done
+	# sed -i "$(grep -n "fi" < ./xentools/updatehost | tr ':' ' ' | awk '{print $1}' | head -1)s/.*/fi\nxl sched-credit -d $DOMNAME -w $CREDIT/" ./xentools/updatehost	# !TODO: fix this scheduling
+	ENDTIME="$(date +%s)"
+	TOTALTIME=$((ENDTIME-STARTTIME))
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
+	printf "\e[38;2;0;255;0m[+]\e[0m Script Time: %s\n" "$TOTALTIME"
+	echo "sudo xl console $DOMNAME"
+	rm -rf "$1"
 }
 
 
 
 
+if [ "$EUID" -ne 0 ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n\n"
+	usage
+	exit 1
+fi
+if ! command -v xl >/dev/null 2>&1;then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is designed for use on a xen hypervisor version 4.1 or higher with xen-tools installed\n"
+	exit 1
+fi
+if ! command -v xen-create-image >/dev/null 2>&1;then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is designed for use on a xen hypervisor version 4.1 or higher with xen-tools installed\n"
+	exit 1
+fi
 
+PROGRAM="${0##*/}"
 
-while [ $# -gt 0 ];do
-	case "$1" in
-		-e|--erase|erase) shift;		erase_dom "$@"			;;
-		* )							usage					;;
-	esac
-	shift
-done
-exit
+case "$1" in
+	-e|--erase|erase) shift;	erase_dom "$@" ;;
+	-n|--new|new) shift;		new_dom "$@" ;;
+	* )		usage ;;
+esac
