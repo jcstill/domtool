@@ -2,13 +2,15 @@
 # shellcheck source=/dev/null
 # shellcheck disable=SC2034,SC2129
 
+SCHED_CONFIG="/etc/xen/sched.conf"
 
 usage(){
 	printf "Usage:\n"
-	printf "  domtool [OPTION] [arguments...]\n\n"
+	printf "  %s [OPTION] [arguments...]\n\n" "$PROGRAM"
 	printf "Options:\n"
-	printf "    -e,--erase,erase <DOMU>         Delete <DOMU>, removing configs and destroying disks\n"
-	printf "    -n,--new,new <CONFIG>           Create new DOMU from <CONFIG>\n"
+	printf "    -e,--erase,erase <DOMU>                 Delete <DOMU>, removing configs and destroying disks\n"
+	printf "    -n,--new,new <CONFIG>                   Create new DOMU from <CONFIG>\n"
+	printf "    -s,--schedule,schedule <DOMU> <VALUE>   Update cpu scheduler for DOMU\n"
 	exit
 }
 
@@ -25,7 +27,7 @@ check_exist(){
 
 erase_dom(){
 	if [ -z "$1" ];then
-		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool -e,--erase,erase <DOMU>\n"
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s -e,--erase,erase <DOMU>\n" "$PROGRAM"
 		exit 1
 	fi
 	if [ "$(check_exist "$1")" == "1" ];then
@@ -42,13 +44,13 @@ erase_dom(){
 	STARTTIME="$(date +%s)"
 	if [ "$DELETE" == "yes" ];then
 		# If DOMU is running, kill it
-		DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
+		DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 		if [ -n "$DOM" ];then
 			printf "\e[38;2;0;255;0m[+]\e[0m Destroying %s\n" "$1"
 			xl destroy "$1"
 			COUNTER=0
 			while [[ $DOM == *"$1"* ]];do
-				DOM="$(xl list | awk '{if(NR>2)print $1}' | grep -w "$1")"
+				DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 				sleep 1
 				COUNTER=$((COUNTER + 1))
 				if [ $COUNTER -gt 300 ];then
@@ -78,6 +80,7 @@ erase_dom(){
 			lvremove /dev/vg0/"$1"-swap -y
 			lvremove /dev/vg0/"$1"-disk -y
 		fi
+		update_sched remove "$1"
 	else
 		printf "\e[38;2;0;255;0m[+]\e[0m Not removing %s\n" "$1"
 	fi
@@ -91,7 +94,7 @@ erase_dom(){
 
 new_dom(){
 	if [ -z "$1" ];then
-		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: domtool -n,--new,new <CONFIG>\n"
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s -n,--new,new <CONFIG>\n" "$PROGRAM"
 		exit 1
 	fi
 	source "$1" 2> /dev/null
@@ -125,33 +128,53 @@ new_dom(){
 	if [[ -z $TYPE ]];then
 		sed -i "s/bootloader = 'pygrub'/type=\n\nbootloader = 'pygrub'/" ./tmp.cfg
 	fi
-	sed -i "$(grep -n type < ./tmp.cfg | tr ':' ' ' | awk '{print $1}')s/.*/type= 'pvh'/" ./tmp.cfg
-	MAC="$(printf '%02X:%s\n' "$(( $(printf '%d\n' $((16#$(openssl rand -hex 1)))) & 254 ))" "$(openssl rand -hex 5 | sed 's/\(..\)/\1:/g; s/:$//')" | sed -e 's/\(.*\)/\U\1/')"
-	IP="$(grep vif < ./tmp.cfg | tr "'" ' ' | tr ',[]' '\n' | grep ip | awk '{print $1}')"
+	sed -i "$(grep -n type < ./tmp.cfg|tr ':' ' '|awk '{print $1}')s/.*/type= 'pvh'/" ./tmp.cfg
+	MAC="$(printf '%02X:%s\n' "$(( $(printf '%d\n' $((16#$(openssl rand -hex 1)))) & 254 ))" "$(openssl rand -hex 5|sed 's/\(..\)/\1:/g; s/:$//')"|sed -e 's/\(.*\)/\U\1/')"
+	IP="$(grep vif < ./tmp.cfg|tr "'" ' '|tr ',[]' '\n'|grep ip|awk '{print $1}')"
 	REP="vif = [ '$IP, mac=$MAC, bridge=xenbr0' ]"
-	sed -i "$(grep -n vif < ./tmp.cfg | tr ':' ' ' | awk '{print $1}')s/.*/$REP/" ./tmp.cfg
+	sed -i "$(grep -n vif < ./tmp.cfg|tr ':' ' '|awk '{print $1}')s/.*/$REP/" ./tmp.cfg
 	cp ./tmp.cfg /etc/xen/"$DOMNAME".cfg
-	RTPASS="$(grep "Root Password" < /var/log/xen-tools/"$DOMNAME".log | awk '{print $4}')"
+	RTPASS="$(grep "Root Password" < /var/log/xen-tools/"$DOMNAME".log|awk '{print $4}')"
 	printf "\e[38;2;0;255;0m[+]\e[0m Root Password: %s\n" "$RTPASS"
 
 	xl create -q /etc/xen/"$DOMNAME".cfg 2>/dev/null
 
-	IP="$(echo "$IP" | tr '=' ' ' | awk '{print $2}')"
-	DOMU="$(ping -c 1 -q "$IP" | grep transmitted | awk '{print $4}')"
+	IP="$(echo "$IP"|tr '=' ' '|awk '{print $2}')"
+	DOMU="$(ping -c 1 -q "$IP"|grep transmitted|awk '{print $4}')"
 	while [ "$DOMU" -ne 1 ];do
-		DOMU="$(ping -c 1 -q "$IP" | grep transmitted | awk '{print $4}')"
+		DOMU="$(ping -c 1 -q "$IP"|grep transmitted|awk '{print $4}')"
 		sleep 1
 	done
-	# sed -i "$(grep -n "fi" < ./xentools/updatehost | tr ':' ' ' | awk '{print $1}' | head -1)s/.*/fi\nxl sched-credit -d $DOMNAME -w $CREDIT/" ./xentools/updatehost	# !TODO: fix this scheduling
+	update_sched "$DOMNAME" $CREDIT
 	ENDTIME="$(date +%s)"
 	TOTALTIME=$((ENDTIME-STARTTIME))
 	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
 	printf "\e[38;2;0;255;0m[+]\e[0m Script Time: %s\n" "$TOTALTIME"
 	echo "sudo xl console $DOMNAME"
-	rm -rf "$1"
+	rm -rf ./tmp.cfg "$1"
 }
 
-
+update_sched(){
+	if [ "$1" == "remove" ] && [ -n "$2" ];then
+		NUMBER="$(grep -nw "$2" < "$SCHED_CONFIG"|tr ':' ' '|awk '{print $1}'|head -1)"
+		if [ -n "$NUMBER" ];then
+			sed -i "$(grep -nw "$2" < "$SCHED_CONFIG"| tr ':' ' '|awk '{print $1}'|head -1)s/.*//" "$SCHED_CONFIG"
+		fi
+		sed -i '/^$/d' "$SCHED_CONFIG"
+		exit 1
+	elif [ -n "$1" ] & [ -n "$2" ];then
+		printf "%s\t%s\n" "$1" "$2" >> "$SCHED_CONFIG"
+	elif [ "$1" != "update" ];then
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s -s,--schedule,schedule <DOMU> <VALUE>\n" "$PROGRAM"
+		exit 1
+	fi
+	while read -r i; do
+		DOMU="$(echo "$i"|awk '{print $1}')"
+		SCHD="$(echo "$i"|awk '{print $2}')"
+		xl sched-credit -d "$DOMU" -w "$SCHD"
+	done < "$SCHED_CONFIG"
+	xl sched-credit
+}
 
 
 if [ "$EUID" -ne 0 ];then
@@ -171,7 +194,8 @@ fi
 PROGRAM="${0##*/}"
 
 case "$1" in
-	-e|--erase|erase) shift;	erase_dom "$@" ;;
-	-n|--new|new) shift;		new_dom "$@" ;;
-	* )		usage ;;
+	-e|--erase|erase) shift;		erase_dom "$@" ;;
+	-n|--new|new) shift;			new_dom "$@" ;;
+	-s|--schedule|schedule) shift;	update_sched "$@" ;;
+	* )								usage ;;
 esac
