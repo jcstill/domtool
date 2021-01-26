@@ -8,9 +8,13 @@ usage(){
 	printf "Usage:\n"
 	printf "  %s [OPTION] [arguments...]\n\n" "$PROGRAM"
 	printf "Options:\n"
-	printf "    -e,--erase,erase <DOMU>                 Delete <DOMU>, removing configs and destroying disks\n"
-	printf "    -n,--new,new <CONFIG>                   Create new DOMU from <CONFIG>\n"
-	printf "    -s,--schedule,schedule <DOMU> <VALUE>   Update cpu scheduler for DOMU\n"
+	printf "    -e,--erase,erase <DOMU>         Delete <DOMU>, removing configs and destroying disks\n"
+	printf "    -n,--new,new <CONFIG>           Create new DOMU from <CONFIG>\n"
+	printf "    -s,--schedule,schedule          Update cpu scheduler for DOMU\n"
+	printf "        <DOMU> <VALUE>                Add DOMU with VALUE weight (calls update)\n"
+	printf "        update                        update running DOMUs with weights specified in:\n"
+	printf "                                             %s\n" "$SCHED_CONFIG"
+	printf "        remove <DOMU>                 removes DOMU from %s\n" "SCHED_CONFIG"
 	exit
 }
 
