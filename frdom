@@ -1,5 +1,0 @@
-#!/bin/bash
-
-sudo xl destroy $1
-sudo xl create /etc/xen/$1.cfg
-#sudo xl console $1
