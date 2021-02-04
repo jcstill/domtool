@@ -1,8 +1,26 @@
 #!/bin/bash
+
+# xen hypervisor helper (basically a wrapper for xl and xen-tools)
+# Copyright (C) 2021, Jacob Still jacobcstill@gmail.com
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see https://www.gnu.org/licenses/
+
 # shellcheck source=/dev/null
 # shellcheck disable=SC2034,SC2129
 
 SCHED_CONFIG="/etc/xen/sched.conf"
+VERSION=0.01
 
 usage(){
 	printf "Usage: %s COMMAND [OPTION]...\n" "$PROGRAM"
@@ -19,8 +37,14 @@ usage(){
 	printf "                                       %s\n" "$SCHED_CONFIG"
 	printf "Options:\n"
 	printf "  -v, --verbose        be verbose in output (add more for more verbosity)\n"
+	printf "  -V, --version        show version and exit\n"
 	printf "  -f, --force          force execute the command\n"
 	printf "  -h, --help           specific command help\n"
+	exit
+}
+
+show_ver(){
+	printf "%s v%s Copyright (C) 2021, Jacob Still jacobcstill@gmail.com\n" "$PROGRAM" "$VERSION"
 	exit
 }
 
@@ -304,19 +328,11 @@ restart_dom(){
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME";fi
 }
 
-for i in xl xen-create-image;do
-	command -v $i >/dev/null 2>&1 || { >&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is designed for use on a xen hypervisor version 4.1 or higher with xen-tools installed\n"; exit 1; }
-done
-if [ "$EUID" -ne 0 ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
-	exit 1
-fi
-
 PROGRAM="${0##*/}"
 VERBOSE=0
 HELP=0
 FORCE=0
-opts="$(getopt -o vfh -l help,verbose,force -n "$PROGRAM" -- "$@" 2>/dev/null)"
+opts="$(getopt -o vVfh -l version,help,verbose,force -n "$PROGRAM" -- "$@" 2>/dev/null)"
 err=$?
 if [ $err -ne 0 ];then
 	usage
@@ -327,8 +343,17 @@ while true; do case $1 in
 	-f|--force) FORCE=1; shift ;;
 	-h|--help) HELP=1; shift ;;
 	-v|--verbose) VERBOSE=$((VERBOSE+1)); shift ;;
+	-V|--version) show_ver ;;
 	--) shift; break ;;
 esac done
+
+for i in xl xen-create-image;do
+	command -v $i >/dev/null 2>&1 || { >&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is designed for use on a xen hypervisor version 4.1 or higher with xen-tools installed\n"; exit 1; }
+done
+if [ "$EUID" -ne 0 ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
+	exit 1
+fi
 
 case "$1" in
 	erase) shift;		erase_dom "$@" ;;
