@@ -16,37 +16,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see https://www.gnu.org/licenses/
 
-DAYSTHRESH=15
-DEVICE="$1"
-NAME="$2"
+# echo "!TODO: add logfile"
+# echo "!TODO: add verbose support"
+# echo "!TODO: add force support"
+# echo "!TODO: change to use LVM snapshots so the vms can stay running"
+# echo
 
-if [ "$HOSTNAME" != "vm-host" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is meant to be run on \"vm-host\"\n"
-	exit 1
-fi
-if [ "$EUID" -ne 0 ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
-	exit 1
-fi
-if [ -z "$DEVICE" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
-	exit 1
-fi
-if [ -z "$NAME" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Usage: %s <DEVICE> <NAME>\n" "$0"
-	exit 1
-fi
-TMP="$(udevadm info --query=all --name="$DEVICE" 2> /dev/null|grep "N:")"
-if [ -z "$TMP" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s does not exist on the system\n" "$DEVICE"
-	exit 1
-fi
-TMP="$(lsblk --ascii --fs "$DEVICE"|head -2|tail -1|grep crypto_LUKS|awk '{print $1}'|tr -d '`-')"
-if [ -z "$TMP" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s not a LUKS encrypted device\n" "$DEVICE"
-	exit 1
-fi
+usage(){
+	printf "Usage: %s PARAMETERS... [OPTIONS]\n" "$PROGRAM"
+	printf "back up host and VMs to a LUKS crypt device\n\n"
+	printf "Required Parameters:\n"
+	printf "  -d, --device DEVICE  partition the crypt device is on\n"
+	printf "  -n, --name NAME      name of the crypt on the drive\n\n"
+	printf "Options:\n"
+	printf "  -f, --force          force execute the command\n"
+	printf "  -h, --help           specific command help\n"
+	printf "  -v, --verbose        be verbose in output\n"
+	printf "  -V, --version        show version and exit\n\n"
+	printf "  -t, --threshold N    threshold number of days to create new backup dir (defaults to 15)\n"
+	printf "  -p, --prefix DIR     specify mount point for crypt device (defaults to %s)\n\n" "$PREFIX"
+	show_ver
+	exit
+}
+show_ver(){
+	printf "%s v%s Copyright (C) 2021, Jacob Still jacobcstill@gmail.com\n" "$PROGRAM" "$VERSION"
+	exit
+}
 
 exiter(){
 	printf "\e[38;2;0;255;0m[+]\e[0m Exiting\n"
@@ -60,6 +55,7 @@ sigint() {
 cleaner(){
 	#Added Sleeps here to give time to umount and such (I may have to add -l to umount, but who knows)
 	printf "\e[38;2;0;255;255m [-]\e[0m Cleaning mounted devices\n"
+	cd /
 	sync 2> /dev/null
 	sleep 1
 	umount /media/tmp 2> /dev/null
@@ -68,7 +64,7 @@ cleaner(){
 	sleep 1
 	lvremove /dev/vg0/tmplvm -y > /dev/null 2>&1
 	sleep 1
-	umount /media/backupspot 2> /dev/null
+	umount "$PREFIX" 2> /dev/null
 	sleep 1
 	vgchange -a n /dev/"$NAME"vg > /dev/null 2>&1
 	sleep 1
@@ -76,33 +72,87 @@ cleaner(){
 	printf "\e[38;2;0;255;255m [-]\e[0m Done\n"
 }
 
+PREFIX="/media/backupspot"
+DAYSTHRESH=15
+PROGRAM="${0##*/}"
+VERBOSE=0
+FORCE=0
+VERSION=0.9
+opts="$(getopt -a -o -d:n:t:vVfh -l device:,name:,threshold:,version,help,verbose,force -n "$PROGRAM" -- "$@" 2>/dev/null)"
+err=$?
+if [ $err -ne 0 ];then
+	usage
+	exit
+fi
+eval set -- "$opts"
+while true; do case $1 in
+	-d|--device) DEVICE="$2"; shift; shift;;
+	-n|--name) NAME="$2"; shift; shift;;
+	-t|--threshold) DAYSTHRESH=$2; shift; shift;;
+	-f|--force) FORCE=1; shift ;;
+	-h|--help) usage ;;
+	-v|--verbose) VERBOSE=$((VERBOSE+1)); shift ;;
+	-V|--version) show_ver ;;
+	--) shift; break ;;
+esac done
+
+if [ "$HOSTNAME" != "vm-host" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m This script is meant to be run on \"vm-host\"\n"
+	exit 1
+fi
+if [ "$EUID" -ne 0 ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s -h for help\n" "$PROGRAM"
+	exit 1
+fi
+if [ -z "$DEVICE" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Device parameter is required\n"
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s -h for help\n" "$PROGRAM"
+	exit 1
+fi
+if [ -z "$NAME" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Name parameter is required\n"
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s -h for help\n" "$PROGRAM"
+	exit 1
+fi
+TMP="$(udevadm info --query=all --name="$DEVICE" 2> /dev/null|grep "N:")"
+if [ -z "$TMP" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s does not exist on the system\n" "$DEVICE"
+	exit 1
+fi
+TMP="$(lsblk --ascii --fs "$DEVICE"|head -2|tail -1|grep crypto_LUKS|awk '{print $1}'|tr -d '`-')"
+if [ -z "$TMP" ];then
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m %s not a LUKS encrypted device\n" "$DEVICE"
+	exit 1
+fi
+
 trap 'sigint' SIGINT
 cryptsetup luksOpen "$DEVICE" "$NAME"
 printf "\e[38;2;0;255;0m[+]\e[0m Setting up script\n"
 sleep 5
 STARTTIME="$(date +%s)"
-mkdir -p /media/backupspot
-umount -l /media/backupspot 2> /dev/null
-printf "\e[38;2;0;255;255m [-]\e[0m Mounting %s on /media/backupspot\n" "$NAME"
-mount /dev/"$NAME"vg/"$NAME"lv /media/backupspot
-TMP="$(lsblk|grep /media/backupspot)"
+mkdir -p "$PREFIX"
+umount -l "$PREFIX" 2> /dev/null
+printf "\e[38;2;0;255;255m [-]\e[0m Mounting %s on %s\n" "$NAME" "$PREFIX"
+mount /dev/"$NAME"vg/"$NAME"lv "$PREFIX"
+TMP="$(lsblk|grep "$PREFIX")"
 if [ -z "$TMP" ];then
-	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Drive not mounted. Mount on /media/backupspot\n"
+	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Drive not mounted. Mount on %s\n" "$PREFIX"
 	cleaner
 	exiter 1
 fi
 
-LATESTBACKUP="$(find /media/backupspot/* -maxdepth 0 -type d|while read -r dir;do TIME="$(echo "$dir"|cut -c19-|sed -r 's/./&\//4'|sed 's/./&\//7'|sed 's/./& /10'|sed 's/./&:/13')";date -d "$TIME" +%s;done|sort -rn|head -1)"
+LATESTBACKUP="$(find "$PREFIX"/* -maxdepth 0 -type d|while read -r dir;do TIME="$(echo "$dir"|cut -c19-|sed -r 's/./&\//4'|sed 's/./&\//7'|sed 's/./& /10'|sed 's/./&:/13')";date -d "$TIME" +%s;done|sort -rn|head -1)"
 DAYSSINCE="$(echo "$(date +%s)" "$LATESTBACKUP"|awk '{printf "%f\n", ($1 - $2)/86400}'|tr '.' ' '|awk '{print $1}')"
-if [ "$DAYSSINCE" -gt $DAYSTHRESH ];then
+if [ "$DAYSSINCE" -gt "$DAYSTHRESH" ];then
 	BACKUPDIR="$(date +%Y%m%d%H00)"
 else
 	BACKUPDIR="$(date -d @"$LATESTBACKUP" +%Y%m%d%H00)"
 fi
-mkdir -p /media/backupspot/"$BACKUPDIR"
+mkdir -p "$PREFIX"/"$BACKUPDIR"
 
 # Keep this for a bit to test that the auto dir naming works
-echo "making /media/backupspot/$BACKUPDIR"
+echo "making $PREFIX/$BACKUPDIR"
 read -p "continue? " CONT
 
 
@@ -153,10 +203,10 @@ for i in $DOMS;do
 		exiter 1
 	fi
 	cd /media/tmp/"$i" 2>/dev/null|| exiter
-	printf "\e[38;2;0;0;255m  [*]\e[0m Compressing %s data to %s on /media/backupspot/$BACKUPDIR\n" "$i" "$DEVICE"
-	tar --atime-preserve --xattrs --acls --numeric-owner -pczfS /media/backupspot/"$BACKUPDIR"/"$i".tar.gz -- *
-	touch -am /media/backupspot/"$BACKUPDIR"/"$i".tar.gz
-	if [ "$(du /media/backupspot/"$BACKUPDIR"/"$i".tar.gz | awk '{print $1}')" -gt 200000000 ];then
+	printf "\e[38;2;0;0;255m  [*]\e[0m Compressing %s data to %s on %s/%s\n" "$i" "$DEVICE" "$PREFIX" "$BACKUPDIR"
+	tar --atime-preserve --xattrs --acls --numeric-owner -Spczf "$PREFIX"/"$BACKUPDIR"/"$i".tar.gz -- *
+	touch -am "$PREFIX"/"$BACKUPDIR"/"$i".tar.gz
+	if [ "$(du "$PREFIX"/"$BACKUPDIR"/"$i".tar.gz | awk '{print $1}')" -gt 200000000 ];then		# !TODO: change to get full root directory size rather than individual machines
 		# Remove the source for the tarball here to save space. (check that it copied completely and then remove it)
 				date +%s			# this is just for me to see timing (it may be faster to just unmount the filesystem and create new)
 		cd /media/tmp 2>/dev/null|| exiter
@@ -176,8 +226,8 @@ if [ ! -d "/media/tmp/vmhost" ]; then
 	exiter 1
 fi
 cd /media/tmp/vmhost 2>/dev/null|| exiter
-printf "\e[38;2;0;0;255m  [*]\e[0m Compressing vmhost data to %s on /media/backupspot/$BACKUPDIR\n" "$DEVICE"
-tar --atime-preserve --xattrs --acls --numeric-owner -pczfS /media/backupspot/"$BACKUPDIR"/vmhost.tar.gz -- *
+printf "\e[38;2;0;0;255m  [*]\e[0m Compressing vmhost data to %s on %s/%s\n" "$DEVICE" "$PREFIX" "$BACKUPDIR"
+tar --atime-preserve --xattrs --acls --numeric-owner -Spczf "$PREFIX"/"$BACKUPDIR"/vmhost.tar.gz -- *
 printf "\e[38;2;0;255;0m[+]\e[0m Cleaning up script\n"
 cleaner
 printf "\e[38;2;0;255;255m [-]\e[0m Updating VMs\n"
