@@ -20,7 +20,7 @@
 # shellcheck disable=SC2034,SC2129
 
 SCHED_CONFIG="/etc/xen/sched.conf"
-VERSION=0.02
+VERSION=0.03
 
 usage(){
 	printf "Usage: %s COMMAND [OPTION]...\n" "$PROGRAM"
@@ -34,14 +34,15 @@ usage(){
 	printf "  \e[1mschedule\e[0m {\e[1madd\e[0m...|\e[1mremove\e[0m...|\e[1mupdate\e[0m}    modify cpu scheduler\n"
 	printf "      \e[1madd\e[0m DOMU VALUE                    add \e[1mDOMU\e[0m with VALUE weight (calls update)\n"
 	printf "      \e[1mremove\e[0m DOMU                       removes \e[1mDOMU\e[0m from %s\n" "SCHED_CONFIG"
-	printf "      \e[1mupdate\e[0m                            update running \e[1mDOMUs\e[0m with weights specified in:\n"
+	printf "      \e[1mupdate\e[0m                            update running \e[1mDOMU\e[0ms with weights specified in:\n"
 	printf "                                         %s\n" "$SCHED_CONFIG"
 	printf "Options:\n"
 	printf "  \e[1m-v\e[0m,\e[1m --verbose\e[0m        be verbose in output (add more for more verbosity)\n"
 	printf "  \e[1m-V\e[0m,\e[1m --version\e[0m        show version and exit\n"
 	printf "  \e[1m-f\e[0m,\e[1m --force\e[0m          force execute the command\n"
 	printf "  \e[1m-h\e[0m,\e[1m --help\e[0m           specific command help\n"
-	printf "  \e[1m-e\e[0m,\e[1m --enable\e[0m         enable DOMU on host boot (only used with create - default is disable)\n"
+	printf "  \e[1m-e\e[0m,\e[1m --enable\e[0m         start DOMU with host (used with create - default is disable)\n"
+	printf "  \e[1m-w\e[0m,\e[1m --wait\e[0m           wait for DOMU to boot (used with create and restart - default is no wait)\n"
 	exit
 }
 
@@ -51,6 +52,9 @@ show_ver(){
 }
 
 check_exist(){
+	local DOM
+	local CFG
+	local LVM
 	DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 	CFG="$(find /etc/xen/*.cfg|grep -w "$1")"
 	LVM="$(find /dev/vg0/*-{disk,swap}|grep -w "$1")"
@@ -194,36 +198,40 @@ create_dom(){
 		exit 1
 	fi
 	STARTTIME="$(date +%s)"
-	xen-create-image --hostname="$DOMNAME" --memory="$MEMORY" --vcpus="$VCPUS" --size="$SIZE" --swap="$SWAP" --dist="$DIST" --ip="$IP" --gateway="$GATEWAY" --netmask="$NETMASK" --nameserver="$NAMESERVER" --lvm="$LVM" --noboot
+	xen-create-image --hostname="$DOMNAME" --memory="$MEMORY" --vcpus="$VCPUS" --size="$SIZE" --swap="$SWAP" --dist="$DIST" --ip="$IP" --gateway="$GATEWAY" --netmask="$NETMASK" --nameserver="$NAMESERVER" --lvm="$LVM" --noboot --pygrub
 	if [ ! -f /etc/xen/"$DOMNAME".cfg ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m /etc/xen/%s.cfg doesn't exist. xen-create-image must have failed. exiting.\n" "$DOMNAME"
-		rm -rf ./tmp.cfg
+		rm -rf ./tmp.xen_cfg
 		exit
 	fi
-	cp /etc/xen/"$DOMNAME".cfg ./tmp.cfg
-	TYPE="$(grep -n type < ./tmp.cfg)"
+	cp /etc/xen/"$DOMNAME".cfg ./tmp.xen_cfg
+	TYPE="$(grep -n type < ./tmp.xen_cfg)"
 	if [[ -z $TYPE ]];then
-		sed -i "s/bootloader = 'pygrub'/type=\n\nbootloader = 'pygrub'/" ./tmp.cfg
+		sed -i "s/bootloader = 'pygrub'/type\n\nbootloader  = 'pygrub'/" ./tmp.xen_cfg
 	fi
-	sed -i "$(grep -n type < ./tmp.cfg|tr ':' ' '|awk '{print $1}')s/.*/type= 'pvh'/" ./tmp.cfg
+	sed -i "$(grep -n type < ./tmp.xen_cfg|tr ':' ' '|awk '{print $1}')s/.*/type        = 'pvh'/" ./tmp.xen_cfg
 	MAC="$(printf '%02X:%s\n' "$(( $(printf '%d\n' $((16#$(openssl rand -hex 1)))) & 254 ))" "$(openssl rand -hex 5|sed 's/\(..\)/\1:/g; s/:$//')"|sed -e 's/\(.*\)/\U\1/')"
-	IP="$(grep vif < ./tmp.cfg|tr "'" ' '|tr ',[]' '\n'|grep ip|awk '{print $1}')"
-	REP="vif = [ '$IP, mac=$MAC, bridge=xenbr0' ]"
-	sed -i "$(grep -n vif < ./tmp.cfg|tr ':' ' '|awk '{print $1}')s/.*/$REP/" ./tmp.cfg
-	cp ./tmp.cfg /etc/xen/"$DOMNAME".cfg
+	IP="$(grep vif < ./tmp.xen_cfg|tr "'" ' '|tr ',[]' '\n'|grep ip|awk '{print $1}')"
+	REP="vif        = [ '$IP, mac=$MAC, bridge=xenbr0' ]"
+	sed -i "$(grep -n vif < ./tmp.xen_cfg|tr ':' ' '|awk '{print $1}')s/.*/$REP/" ./tmp.xen_cfg
+	CFGLINENO="$(grep -n xen-tools < ./tmp.xen_cfg|tr ':' ' '|awk '{print $1}')"
+	sed -i "$((CFGLINENO+1))s/^/#\n# Modified by $PROGRAM on $(date)\n/" ./tmp.xen_cfg
+	cp ./tmp.xen_cfg /etc/xen/"$DOMNAME".cfg
 	RTPASS="$(grep "Root Password" < /var/log/xen-tools/"$DOMNAME".log|awk '{print $4}')"
 	printf "\e[38;2;0;255;0m[+]\e[0m Root Password: %s\n" "$RTPASS"
 
 	xl create -q /etc/xen/"$DOMNAME".cfg 2>/dev/null
 
-	IP="$(echo "$IP"|tr '=' ' '|awk '{print $2}')"
-	DOMU="$(ping -c 1 -q "$IP"|grep transmitted|awk '{print $4}')"
-	while [ "$DOMU" -ne 1 ];do
+	if [ "$WAITFORBOOT" == "1" ];then
+		IP="$(echo "$IP"|tr '=' ' '|awk '{print $2}')"
 		DOMU="$(ping -c 1 -q "$IP"|grep transmitted|awk '{print $4}')"
-		sleep 1
-	done
+		while [ "$DOMU" -ne 1 ];do
+			DOMU="$(ping -c 1 -q "$IP"|grep transmitted|awk '{print $4}')"
+			sleep 1
+		done
+	fi
 	update_sched add "$DOMNAME" "$CREDIT"
-	if [ "ENABLE" == "1" ];then
+	if [ "$ENABLE" == "1" ];then
 		ed_dom enable "$DOMNAME"
 	fi
 	ENDTIME="$(date +%s)"
@@ -231,7 +239,7 @@ create_dom(){
 	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
 	printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME"
 	echo "sudo xl console $DOMNAME"
-	rm -rf ./tmp.cfg
+	rm -rf ./tmp.xen_cfg
 }
 
 update_sched(){
@@ -256,16 +264,22 @@ update_sched(){
 		return
 	fi
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m updating DOMUs from config\n";fi
+	SCHD_PRG="$(xl sched-credit2)"
+	if [ -z "$SCHD_PRG" ];then
+		SCHD_PRG="sched-credit"
+	else
+		SCHD_PRG="sched-credit2"
+	fi
 	while read -r i; do
 		DOMU="$(echo "$i"|awk '{print $1}')"
 		SCHD="$(echo "$i"|awk '{print $2}')"
 		if [ "$VERBOSE" -ge "2" ];then
-			xl sched-credit -d "$DOMU" -w "$SCHD"
+			xl $SCHD_PRG -d "$DOMU" -w "$SCHD"
 		else
-			xl sched-credit -d "$DOMU" -w "$SCHD" 2>/dev/null
+			xl $SCHD_PRG -d "$DOMU" -w "$SCHD" 2>/dev/null
 		fi
 	done < "$SCHED_CONFIG"
-	if [ "$VERBOSE" -ge "2" ];then xl sched-credit 2>/dev/null;fi
+	if [ "$VERBOSE" -ge "2" ];then xl $SCHD_PRG 2>/dev/null;fi
 	ENDTIME="$(date +%s)"
 	TOTALTIME=$((ENDTIME-STARTTIME))
 	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
@@ -343,25 +357,56 @@ ed_dom(){
 		exit 1
 	fi
 	if [ "$(file /etc/xen/auto|awk '{print $2}')" != "directory" ];then
-		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m /etc/xen/auto is not a directory. Delete and make it a dir\n";fi
-		return
-		# !TODO: add logic to enable all machines in auto
+		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m /etc/xen/auto is not a directory. Preserving configs and linking.\n";fi
+		for i in /etc/xen/auto/*.cfg; do
+			test -f "$i" || continue
+			if [ "$VERBOSE" -ge "2" ];then printf "preserving %s\n" "$i";fi
+			echo "$i" >> ./tmp.xen_cfg
+		done
+		if [ "$VERBOSE" -ge "2" ];then printf "remove /etc/xen/auto\n";fi
 		rm -rf /etc/xen/auto
+		if [ "$VERBOSE" -ge "2" ];then printf "mkdir /etc/xen/auto\n";fi
 		mkdir -p /etc/xen/auto
+		while read -r i; do
+			i="$(echo "$i"|sed "s/auto\///")"
+			if [ "$VERBOSE" -ge "2" ];then printf "link %s to /etc/xen/auto/\n" "$i";fi
+			ln -sf "$i" /etc/xen/auto/
+		done < ./tmp.xen_cfg
+		rm -rf ./tmp.xen_cfg
 	fi
 	if [ "$1" == "enable" ];then
-		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Creating symlink\n";fi
-		ln -sf /etc/xen/"$2".cfg /etc/xen/auto/
 		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
+		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		if [ -z "$SCHD" ];then
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s\n" "$SCHED_CONFIG"
+			update_sched add "$2" 256
+		fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		sed -i "$(grep -n "$2" < "$SCHED_CONFIG"| tr ':' ' ' | awk '{print $1}' | head -1)s/.*/$2\t$SCHD\t1/" "$SCHED_CONFIG"
 	elif [ "$1" == "disable" ];then
-		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Removing symlink\n";fi
-		rm -rf /etc/xen/auto/"$2".cfg
 		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
+		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		if [ -z "$SCHD" ];then
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s\n" "$SCHED_CONFIG"
+			update_sched add "$2" 256
+		fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		sed -i "$(grep -n "$2" < "$SCHED_CONFIG"| tr ':' ' ' | awk '{print $1}' | head -1)s/.*/$2\t$SCHD\t0/" "$SCHED_CONFIG"
 	fi
+	while read -r i; do
+		DOMU="$(echo "$i"|awk '{print $1}')"
+		if [ "$DOMU" == "Domain-0" ];then
+			continue
+		fi
+		AUTOBOOT="$(echo "$i"|awk '{print $3}')"
+		if [ "$AUTOBOOT" == "1" ];then
+			if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Creating symlink for %s\n" "$DOMU";fi
+			ln -sf /etc/xen/"$2".cfg /etc/xen/auto/
+		elif [ "$AUTOBOOT" == "0" ];then
+			if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Removing symlink for %s\n" "$DOMU";fi
+			rm -rf /etc/xen/auto/"$2".cfg
+		fi
+	done < "$SCHED_CONFIG"
 	if [ "$VERBOSE" -ge "2" ];then
 		cat "$SCHED_CONFIG"
 	fi
@@ -380,6 +425,7 @@ if [ $err -ne 0 ];then
 fi
 eval set -- "$opts"
 while true; do case $1 in
+	-w|--wait) WAITFORBOOT=1; shift ;;
 	-f|--force) FORCE=1; shift ;;
 	-e|--enable) ENABLE=1; shift ;;
 	-h|--help) HELP=1; shift ;;
@@ -394,6 +440,10 @@ done
 if [ "$EUID" -ne 0 ];then
 	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
 	exit 1
+fi
+
+if [ ! -f "$SCHED_CONFIG" ]; then
+	printf "Domain-0	1024	0\n" > "$SCHED_CONFIG"
 fi
 
 case "$1" in
