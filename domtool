@@ -20,22 +20,25 @@
 # shellcheck disable=SC2034,SC2129
 
 SCHED_CONFIG="/etc/xen/sched.conf"
-VERSION=0.03
+VER_MAJOR=0
+VER_MINOR=04
+VER_EXTRA=
+VERSION="$VER_MAJOR.$VER_MINOR-$VER_EXTRA"
 
 usage(){
 	printf "Usage: %s COMMAND [OPTION]...\n" "$PROGRAM"
 	printf "xen hypervisor helper (basically a wrapper for xl and xen-tools)\n\n"
 	printf "Commands:\n"
-	printf "  \e[1mcreate\e[0m [CONFIG_FILE]                  create new \e[1mDOMU\e[0m interactively or from CONFIG_FILE\n"
-	printf "  \e[1mdisable\e[0m|\e[1menable\e[0m DOMU                   enable or disable \e[1mDOMU\e[0m from starting on host boot\n"
-	printf "  \e[1merase\e[0m DOMU                            delete \e[1mDOMU\e[0m, removing configs and destroying disks\n"
+	printf "  \e[1mcreate\e[0m [CONFIG_FILE]                  create new DOMU interactively or from CONFIG_FILE\n"
+	printf "  \e[1mdisable\e[0m|\e[1menable\e[0m DOMU                   enable or disable DOMU from starting on host boot\n"
+	printf "  \e[1merase\e[0m DOMU                            delete DOMU, removing configs and destroying disks\n"
 	printf "  \e[1mhelp\e[0m                                  print this usage\n"
-	printf "  \e[1mrestart\e[0m DOMU                          restart \e[1mDOMU\e[0m\n"
-	printf "  \e[1mschedule\e[0m [\e[1madd\e[0m...|\e[1mremove\e[0m...|\e[1mupdate\e[0m]    modify cpu scheduler\n"
-	printf "      \e[1madd\e[0m DOMU VALUE                    add \e[1mDOMU\e[0m with VALUE weight (calls update)\n"
-	printf "      \e[1medit\e[0m DOMU VALUE                   change \e[1mDOMU\e[0m to new VALUE weight (calls update)\n"
-	printf "      \e[1mremove\e[0m DOMU                       removes \e[1mDOMU\e[0m from %s\n" "SCHED_CONFIG"
-	printf "      \e[1mupdate\e[0m                            update running \e[1mDOMU\e[0ms with weights specified in:\n"
+	printf "  \e[1mrestart\e[0m DOMU                          restart DOMU\n"
+	printf "  \e[1mschedule\e[0m [COMMAND]                    modify cpu scheduler\n"
+	printf "      \e[1madd\e[0m DOMU VALUE                    add DOMU with VALUE weight (calls update)\n"
+	printf "      \e[1medit\e[0m DOMU VALUE                   change DOMU to new VALUE weight (calls update)\n"
+	printf "      \e[1mremove\e[0m DOMU                       removes DOMU from %s\n" "SCHED_CONFIG"
+	printf "      \e[1mupdate\e[0m                            update running DOMUs with weights specified in:\n"
 	printf "                                         %s\n" "$SCHED_CONFIG"
 	printf "Options:\n"
 	printf "  \e[1m-v\e[0m,\e[1m --verbose\e[0m        be verbose in output (add more for more verbosity)\n"
@@ -165,7 +168,6 @@ erase_dom(){
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME";fi
 }
 
-# !TODO: add interactive mode
 create_dom(){
 	if [ -z "$1" ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s new [CONFIG_FILE]\n" "$PROGRAM"
@@ -428,20 +430,20 @@ ed_dom(){
 		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		if [ -z "$SCHD" ];then
-			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s\n" "$SCHED_CONFIG"
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s. Adding with default schedule\n" "$SCHED_CONFIG"
 			update_sched add "$2" 256
 		fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
-		sed -i "$(grep -n "$2" < "$SCHED_CONFIG"| tr ':' ' ' | awk '{print $1}' | head -1)s/.*/$2\t$SCHD\t1/" "$SCHED_CONFIG"
+		sed -i "$(grep -nw "$2" < "$SCHED_CONFIG"| tr ':' ' '|awk '{print $1}'|head -1)s/.*/$2\t$SCHD\t1/" "$SCHED_CONFIG"
 	elif [ "$1" == "disable" ];then
 		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		if [ -z "$SCHD" ];then
-			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s\n" "$SCHED_CONFIG"
+			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s. Adding with default schedule\n" "$SCHED_CONFIG"
 			update_sched add "$2" 256
 		fi
 		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
-		sed -i "$(grep -n "$2" < "$SCHED_CONFIG"| tr ':' ' ' | awk '{print $1}' | head -1)s/.*/$2\t$SCHD\t0/" "$SCHED_CONFIG"
+		sed -i "$(grep -nw "$2" < "$SCHED_CONFIG"| tr ':' ' '|awk '{print $1}'|head -1)s/.*/$2\t$SCHD\t0/" "$SCHED_CONFIG"
 	fi
 	while read -r i; do
 		DOMU="$(echo "$i"|awk '{print $1}')"
@@ -491,17 +493,19 @@ if [ "$EUID" -ne 0 ];then
 	>&2 printf "\e[38;2;255;0;0m[!]\e[0m Please run as root\n"
 	exit 1
 fi
-
+if [ "$VER_EXTRA" == "pre" ];then
+	printf "\e[38;2;255;255;0m[!]\e[0m This version of %s is a pre release version %s\n" "$PROGRAM" "$VERSION"
+fi
 if [ ! -f "$SCHED_CONFIG" ]; then
 	printf "Domain-0	1024	0\n" > "$SCHED_CONFIG"
 fi
 
 case "$1" in
+	create) shift;		create_dom "$@" ;;
 	disable|enable)		ed_dom "$@";;
 	erase) shift;		erase_dom "$@" ;;
-	restart) shift;		restart_dom "$@" ;;
-	create) shift;		create_dom "$@" ;;
-	schedule) shift;	update_sched "$@" ;;
 	help)				usage ;;
+	restart) shift;		restart_dom "$@" ;;
+	schedule) shift;	update_sched "$@" ;;
 	* )					usage ;;
 esac
