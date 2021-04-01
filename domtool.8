@@ -1,0 +1,93 @@
+.\"manpage by Jacob Still
+.TH "DOMTOOL" "8" "2020-03-31" "v0.04" "domtool manual"
+
+.SH NAME
+domtool \- xen hypervisor and xen-tools helper. And DOMU manager
+
+.SH SYNOPSIS
+.B domtool
+COMMAND [\fI\,OPTION\/\fR]...
+
+.SH DESCRIPTION
+.PP
+xen hypervisor helper (basically a wrapper for xl and xen-tools)
+
+.SH COMMANDS
+.TP
+\fBcreate\fR [CONFIG_FILE]
+create new DOMU interactively or from CONFIG_FILE
+.TP
+\fBdisable\fR|\fBenable\fR DOMU
+enable or disable DOMU from starting on host boot
+.TP
+\fBerase\fR DOMU
+delete DOMU, removing configs and destroying disks
+.TP
+\fBhelp\fR
+print usage and exit
+.TP
+\fBrestart\fR DOMU
+restart DOMU
+.TP
+\fBschedule\fR [COMMAND]
+modify cpu scheduler - if no command is passed, shows the current schedule
+.TP
+        \fBadd\fR DOMU VALUE
+        add DOMU with VALUE weight (calls update)
+.TP
+        \fBedit\fR DOMU VALUE
+        change DOMU to new VALUE weight (calls update)
+.TP
+        \fBremove\fR DOMU
+        removes DOMU from SCHED_CONFIG
+.TP
+        \fBupdate\fR
+        update running DOMUs with weights specified in /etc/xen/sched.conf
+        this is called by domtool.service on system boot
+
+.SH OPTIONS
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+be verbose in output (add more for more verbosity)
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+show version and exit
+.TP
+\fB\-f\fR, \fB\-\-force\fR
+force execute the command
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+specific command help
+.TP
+\fB\-e\fR, \fB\-\-enable\fR
+start DOMU with host (used with create - default is disable)
+.TP
+\fB\-w\fR, \fB\-\-wait\fR
+wait for DOMU to boot (used with create and restart - default is no wait)
+
+.SH EXAMPLES
+.TP
+domtool create config.txt
+creates a DOMU from parameters specified in config.txt
+.TP
+domtool schedule edit domtooltest 128
+changes the schedule of domtooltest to 128
+
+.SH FILES
+.PP
+domtool uses /etc/xen/sched.conf to store scheduling and hostboot info
+
+.SH AUTHOR
+Written by Jacob Still
+
+.SH BUGS
+All bugs or requests should go through the gitea page: <https://gitea.jcstill.com/>
+
+.SH COPYRIGHT
+.PP
+Copyright \(co 2021 Jacob Still jacobcstill@gmail.com
+.PP
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
+.PP
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
