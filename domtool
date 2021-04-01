@@ -31,7 +31,7 @@ usage(){
 	printf "  \e[1merase\e[0m DOMU                            delete \e[1mDOMU\e[0m, removing configs and destroying disks\n"
 	printf "  \e[1mhelp\e[0m                                  print this usage\n"
 	printf "  \e[1mrestart\e[0m DOMU                          restart \e[1mDOMU\e[0m\n"
-	printf "  \e[1mschedule\e[0m {\e[1madd\e[0m...|\e[1mremove\e[0m...|\e[1mupdate\e[0m}    modify cpu scheduler\n"
+	printf "  \e[1mschedule\e[0m [\e[1madd\e[0m...|\e[1mremove\e[0m...|\e[1mupdate\e[0m]    modify cpu scheduler\n"
 	printf "      \e[1madd\e[0m DOMU VALUE                    add \e[1mDOMU\e[0m with VALUE weight (calls update)\n"
 	printf "      \e[1mremove\e[0m DOMU                       removes \e[1mDOMU\e[0m from %s\n" "SCHED_CONFIG"
 	printf "      \e[1mupdate\e[0m                            update running \e[1mDOMU\e[0ms with weights specified in:\n"
@@ -244,10 +244,16 @@ create_dom(){
 
 update_sched(){
 	if [ "$HELP" == "1" ];then
-		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s schedule {add DOMU VALUE|remove DOMU|update}\n" "$PROGRAM"
+		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s schedule [add DOMU VALUE|remove DOMU|update]\n" "$PROGRAM"
 		exit 1
 	fi
 	STARTTIME="$(date +%s)"
+	SCHD_PRG="$(xl sched-credit2)"
+	if [ -z "$SCHD_PRG" ];then
+		SCHD_PRG="sched-credit"
+	else
+		SCHD_PRG="sched-credit2"
+	fi
 	if [ "$1" == "add" ] && [ -n "$2" ] && [ -n "$3" ];then
 		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m adding %s to config\n" "$2";fi
 		printf "%s\t%s\n" "$2" "$3" >> "$SCHED_CONFIG"
@@ -260,16 +266,34 @@ update_sched(){
 		sed -i '/^$/d' "$SCHED_CONFIG"
 		return
 	elif [ "$1" != "update" ];then
-		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s schedule {add DOMU VALUE|remove DOMU|update}\n" "$PROGRAM"
+		PAD_ID=38
+		PAD_WEIGHT=7
+		PAD_TARGET=7
+		PAD_CAP=4
+		PAD=$(printf '%0.1s' " "{1..60})
+		printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
+				"Name" 0 $((38 - 4 - 2 )) "$PAD" \
+				"ID" 0 $(($PAD_WEIGHT - 6 )) "$PAD" \
+				"Weight" 0 $(($PAD_TARGET - 6 )) "$PAD" \
+				"Target" 0 $(($PAD_CAP - 3 )) "$PAD" \
+				"Cap"
+		for DOM_NAME in $(xl list | awk '{if(NR>1)print $1}');do
+			SCHD_RAW="$(xl $SCHD_PRG 2>/dev/null|grep -w "$DOM_NAME")"
+			SCHD_NAME="$(awk '{print $1}' <<< "$SCHD_RAW")"
+			SCHD_ID="$(awk '{print $2}' <<< "$SCHD_RAW")"
+			SCHD_WEIGHT="$(awk '{print $3}' <<< "$SCHD_RAW")"
+			SCHD_TARGET="$(grep -w "$DOM_NAME" "$SCHED_CONFIG"|awk '{print $2}')"
+			SCHD_CAP="$(awk '{print $4}' <<< "$SCHD_RAW")"
+			printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
+					"$SCHD_NAME" 0 $((38 - ${#SCHD_NAME} - ${#SCHD_ID} )) "$PAD" \
+					"$SCHD_ID" 0 $(($PAD_WEIGHT - ${#SCHD_WEIGHT} )) "$PAD" \
+					"$SCHD_WEIGHT" 0 $(($PAD_TARGET - ${#SCHD_TARGET} )) "$PAD" \
+					"$SCHD_TARGET" 0 $(($PAD_CAP - ${#SCHD_CAP} )) "$PAD" \
+					"$SCHD_CAP"
+		done
 		return
 	fi
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m updating DOMUs from config\n";fi
-	SCHD_PRG="$(xl sched-credit2)"
-	if [ -z "$SCHD_PRG" ];then
-		SCHD_PRG="sched-credit"
-	else
-		SCHD_PRG="sched-credit2"
-	fi
 	while read -r i; do
 		DOMU="$(echo "$i"|awk '{print $1}')"
 		SCHD="$(echo "$i"|awk '{print $2}')"
