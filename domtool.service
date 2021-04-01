@@ -1,0 +1,12 @@
+[Unit]
+Description=domtool xen helper service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/domtool schedule update
+Restart=on-failure
+RestartSec=10
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
