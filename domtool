@@ -23,7 +23,11 @@ SCHED_CONFIG="/etc/xen/sched.conf"
 VER_MAJOR=0
 VER_MINOR=04
 VER_EXTRA=
-VERSION="$VER_MAJOR.$VER_MINOR-$VER_EXTRA"
+if [ "$VER_EXTRA" == "pre" ];then
+	VERSION="$VER_MAJOR.$VER_MINOR-$VER_EXTRA"
+else
+	VERSION="$VER_MAJOR.$VER_MINOR"
+fi
 
 usage(){
 	printf "Usage: %s COMMAND [OPTION]...\n" "$PROGRAM"
@@ -41,12 +45,12 @@ usage(){
 	printf "      \e[1mupdate\e[0m                            update running DOMUs with weights specified in:\n"
 	printf "                                         %s\n" "$SCHED_CONFIG"
 	printf "Options:\n"
-	printf "  \e[1m-v\e[0m,\e[1m --verbose\e[0m        be verbose in output (add more for more verbosity)\n"
-	printf "  \e[1m-V\e[0m,\e[1m --version\e[0m        show version and exit\n"
-	printf "  \e[1m-f\e[0m,\e[1m --force\e[0m          force execute the command\n"
-	printf "  \e[1m-h\e[0m,\e[1m --help\e[0m           specific command help\n"
-	printf "  \e[1m-e\e[0m,\e[1m --enable\e[0m         start DOMU with host (used with create - default is disable)\n"
-	printf "  \e[1m-w\e[0m,\e[1m --wait\e[0m           wait for DOMU to boot (used with create and restart - default is no wait)\n"
+	printf "  \e[1m-v\e[0m,\e[1m --verbose\e[0m      be verbose in output (add more for more verbosity)\n"
+	printf "  \e[1m-V\e[0m,\e[1m --version\e[0m      show version and exit\n"
+	printf "  \e[1m-f\e[0m,\e[1m --force\e[0m        force execute the command\n"
+	printf "  \e[1m-h\e[0m,\e[1m --help\e[0m         specific command help\n"
+	printf "  \e[1m-e\e[0m,\e[1m --enable\e[0m       start DOMU with host (used with create - default is disable)\n"
+	printf "  \e[1m-w\e[0m,\e[1m --wait\e[0m         wait for DOMU to boot (used with create and restart - default is no wait)\n"
 	exit
 }
 
