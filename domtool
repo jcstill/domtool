@@ -38,7 +38,7 @@ usage(){
 	printf "  \e[1merase\e[0m DOMU                            delete DOMU, removing configs and destroying disks\n"
 	printf "  \e[1mhelp\e[0m                                  print this usage\n"
 	printf "  \e[1mrestart\e[0m DOMU                          restart DOMU\n"
-	printf "  \e[1mschedule\e[0m [COMMAND]                    modify cpu scheduler\n"
+	printf "  \e[1mschedule\e[0m [COMMAND]                    modify cpu scheduler or show the current schedule\n"
 	printf "      \e[1madd\e[0m DOMU VALUE                    add DOMU with VALUE weight (calls update)\n"
 	printf "      \e[1medit\e[0m DOMU VALUE                   change DOMU to new VALUE weight (calls update)\n"
 	printf "      \e[1mremove\e[0m DOMU                       removes DOMU from %s\n" "SCHED_CONFIG"
@@ -74,6 +74,9 @@ check_exist(){
 }
 
 erase_dom(){
+	local STARTTIME
+	local ENDTIME
+	local TOTALTIME
 	if [ -z "$1" ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s erase DOMU\n" "$PROGRAM"
 		exit 1
@@ -99,7 +102,7 @@ erase_dom(){
 	else
 		DELETE=yes
 	fi
-	STARTTIME="$(date +%s)"
+	STARTTIME="$(date +%s.%N)"
 	if [ "$DELETE" == "yes" ];then
 		# If DOMU is running, kill it
 		DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
@@ -166,13 +169,16 @@ erase_dom(){
 		printf "\e[38;2;0;255;0m[+]\e[0m not removing %s\n" "$1"
 	fi
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m done\n";fi
-	ENDTIME="$(date +%s)"
-	TOTALTIME=$((ENDTIME-STARTTIME))
-	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
-	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME";fi
+	ENDTIME="$(date +%s.%N)"
+	TOTALTIME=$(printf '%.9f\n' "$(bc <<< "scale=9; $ENDTIME-$STARTTIME")")
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S.%N)"
+	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m erase_dom time: %s\n" "$TOTALTIME";fi
 }
 
 create_dom(){
+	local STARTTIME
+	local ENDTIME
+	local TOTALTIME
 	if [ -z "$1" ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s new [CONFIG_FILE]\n" "$PROGRAM"
 		exit 1
@@ -204,7 +210,7 @@ create_dom(){
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU %s already exists\n" "$DOMNAME"
 		exit 1
 	fi
-	STARTTIME="$(date +%s)"
+	STARTTIME="$(date +%s.%N)"
 	xen-create-image --hostname="$DOMNAME" --memory="$MEMORY" --vcpus="$VCPUS" --size="$SIZE" --swap="$SWAP" --dist="$DIST" --ip="$IP" --gateway="$GATEWAY" --netmask="$NETMASK" --nameserver="$NAMESERVER" --lvm="$LVM" --noboot --pygrub
 	if [ ! -f /etc/xen/"$DOMNAME".cfg ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m /etc/xen/%s.cfg doesn't exist. xen-create-image must have failed. exiting.\n" "$DOMNAME"
@@ -241,20 +247,23 @@ create_dom(){
 	if [ "$ENABLE" == "1" ];then
 		ed_dom enable "$DOMNAME"
 	fi
-	ENDTIME="$(date +%s)"
-	TOTALTIME=$((ENDTIME-STARTTIME))
-	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
-	printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME"
+	ENDTIME="$(date +%s.%N)"
+	TOTALTIME=$(printf '%.9f\n' "$(bc <<< "scale=9; $ENDTIME-$STARTTIME")")
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S.%N)"
+	printf "\e[38;2;0;255;0m[+]\e[0m create_dom time: %s\n" "$TOTALTIME"
 	echo "sudo xl console $DOMNAME"
 	rm -rf ./tmp.xen_cfg
 }
 
 update_sched(){
+	local STARTTIME
+	local ENDTIME
+	local TOTALTIME
 	if [ "$HELP" == "1" ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s schedule [add DOMU VALUE|edit DOMU VALUE|remove DOMU|update]\n" "$PROGRAM"
 		exit 1
 	fi
-	STARTTIME="$(date +%s)"
+	STARTTIME="$(date +%s.%N)"
 	SCHD_PRG="$(xl sched-credit2)"
 	if [ -z "$SCHD_PRG" ];then
 		SCHD_PRG="sched-credit"
@@ -336,13 +345,16 @@ update_sched(){
 					"$SCHD_CAP"
 		done
 	fi
-	ENDTIME="$(date +%s)"
-	TOTALTIME=$((ENDTIME-STARTTIME))
-	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
-	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME";fi
+	ENDTIME="$(date +%s.%N)"
+	TOTALTIME=$(printf '%.9f\n' "$(bc <<< "scale=9; $ENDTIME-$STARTTIME")")
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S.%N)"
+	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m update_sched time: %s\n" "$TOTALTIME";fi
 }
 
 restart_dom(){
+	local STARTTIME
+	local ENDTIME
+	local TOTALTIME
 	if [ -z "$1" ];then
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m usage: %s erase DOMU\n" "$PROGRAM"
 		exit 1
@@ -355,7 +367,7 @@ restart_dom(){
 		>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU specified not found\n"
 		return
 	fi
-	STARTTIME="$(date +%s)"
+	STARTTIME="$(date +%s.%N)"
 	# If DOMU is running, kill it
 	DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 	if [ -n "$DOM" ];then
@@ -397,10 +409,10 @@ restart_dom(){
 	else
 		xl create -q /etc/xen/"$1".cfg 2> /dev/null
 	fi
-	ENDTIME="$(date +%s)"
-	TOTALTIME=$((ENDTIME-STARTTIME))
-	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S)"
-	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m script time: %s\n" "$TOTALTIME";fi
+	ENDTIME="$(date +%s.%N)"
+	TOTALTIME=$(printf '%.9f\n' "$(bc <<< "scale=9; $ENDTIME-$STARTTIME")")
+	TOTALTIME="$(date -d@$TOTALTIME -u +%H:%M:%S.%N)"
+	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m restart_dom time: %s\n" "$TOTALTIME";fi
 }
 
 ed_dom(){
