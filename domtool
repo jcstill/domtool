@@ -325,13 +325,15 @@ update_sched(){
 		PAD_WEIGHT=7
 		PAD_TARGET=7
 		PAD_CAP=4
+		PAD_AUTO=8
 		PAD=$(printf '%0.1s' " "{1..60})
-		printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
+		printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
 				"Name" 0 $((38 - 4 - 2 )) "$PAD" \
 				"ID" 0 $(($PAD_WEIGHT - 6 )) "$PAD" \
 				"Weight" 0 $(($PAD_TARGET - 6 )) "$PAD" \
 				"Target" 0 $(($PAD_CAP - 3 )) "$PAD" \
-				"Cap"
+				"Cap" 0 $(($PAD_AUTO - 7 )) "$PAD" \
+				"Enabled"
 		for DOM_NAME in $(xl list|awk '{if(NR>1)print $1}');do
 			SCHD_RAW="$(xl $SCHD_PRG 2>/dev/null|grep -w "$DOM_NAME")"
 			SCHD_NAME="$(awk '{print $1}' <<< "$SCHD_RAW")"
@@ -339,12 +341,14 @@ update_sched(){
 			SCHD_WEIGHT="$(awk '{print $3}' <<< "$SCHD_RAW")"
 			SCHD_TARGET="$(grep -w "$DOM_NAME" "$SCHED_CONFIG"|awk '{print $2}')"
 			SCHD_CAP="$(awk '{print $4}' <<< "$SCHD_RAW")"
-			printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
+			SCHD_AUTO="$(grep -w "$DOM_NAME" "$SCHED_CONFIG"|awk '{print $3}')"
+			printf "%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s%*.*s%s\n" \
 					"$SCHD_NAME" 0 $((38 - ${#SCHD_NAME} - ${#SCHD_ID} )) "$PAD" \
 					"$SCHD_ID" 0 $(($PAD_WEIGHT - ${#SCHD_WEIGHT} )) "$PAD" \
 					"$SCHD_WEIGHT" 0 $(($PAD_TARGET - ${#SCHD_TARGET} )) "$PAD" \
 					"$SCHD_TARGET" 0 $(($PAD_CAP - ${#SCHD_CAP} )) "$PAD" \
-					"$SCHD_CAP"
+					"$SCHD_CAP" 0 $(($PAD_AUTO - ${#SCHD_AUTO} )) "$PAD" \
+					"$SCHD_AUTO"
 		done
 	fi
 	ENDTIME="$(date +%s.%N)"
