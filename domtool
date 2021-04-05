@@ -21,7 +21,7 @@
 
 SCHED_CONFIG="/etc/xen/sched.conf"
 VER_MAJOR=0
-VER_MINOR=04
+VER_MINOR=05
 VER_EXTRA=
 if [ "$VER_EXTRA" == "pre" ];then
 	VERSION="$VER_MAJOR.$VER_MINOR-$VER_EXTRA"
@@ -104,6 +104,8 @@ erase_dom(){
 	fi
 	STARTTIME="$(date +%s.%N)"
 	if [ "$DELETE" == "yes" ];then
+		# use functionality in ed_dom to remove symlink in /etc/xen/auto
+		ed_dom disable "$1"
 		# If DOMU is running, kill it
 		DOM="$(xl list|awk '{if(NR>2)print $1}'|grep -w "$1")"
 		if [ -n "$DOM" ];then
@@ -201,7 +203,7 @@ create_dom(){
 			printf "# General:\nDOMNAME=\nDIST=\nVCPUS=1\nMEMORY=1gb\n\n" > "$1"
 			printf "# Networking:\nIP=\nGATEWAY=\nNETMASK=\nNAMESERVER=\n\n" >> "$1"
 			printf "# Storage:\nLVM=vg0\nSIZE=15gb\nSWAP=2gb\n\n" >> "$1"
-			printf "# Credit Scheduler\nCREDIT=256\n" >> "$1"
+			printf "# Credit Scheduler\nCREDIT=256\nENABLE=0" >> "$1"
 			
 		fi
 		return
@@ -244,7 +246,7 @@ create_dom(){
 		done
 	fi
 	update_sched add "$DOMNAME" "$CREDIT"
-	if [ "$ENABLE" == "1" ];then
+	if [ "$ENABLE" == "1" ] || [ "$ENABLE" == "yes" ] || [ "$ENABLE" == "true" ];then
 		ed_dom enable "$DOMNAME"
 	fi
 	ENDTIME="$(date +%s.%N)"
@@ -401,8 +403,10 @@ restart_dom(){
 				break
 			fi
 		done
+		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m %s is down\n" "$1";fi
+	else
+		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m %s is not running. not trying to shut down\n" "$1";fi
 	fi
-	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m %s is down\n" "$1";fi
 	if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m starting %s\n" "$1";fi
 	if [ "$VERBOSE" -ge "2" ];then
 		xl create /etc/xen/"$1".cfg
@@ -443,22 +447,22 @@ ed_dom(){
 		rm -rf ./tmp.xen_cfg
 	fi
 	if [ "$1" == "enable" ];then
-		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
-		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config: %s enabled\n" "$2";fi
+		SCHD="$(grep -w "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		if [ -z "$SCHD" ];then
 			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s. Adding with default schedule\n" "$SCHED_CONFIG"
 			update_sched add "$2" 256
 		fi
-		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		SCHD="$(grep -w "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		sed -i "$(grep -nw "$2" < "$SCHED_CONFIG"| tr ':' ' '|awk '{print $1}'|head -1)s/.*/$2\t$SCHD\t1/" "$SCHED_CONFIG"
 	elif [ "$1" == "disable" ];then
-		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config\n";fi
-		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		if [ "$VERBOSE" -ge "1" ];then printf "\e[38;2;0;255;0m[+]\e[0m Writing config: %s disabled\n" "$2";fi
+		SCHD="$(grep -w "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		if [ -z "$SCHD" ];then
 			>&2 printf "\e[38;2;255;0;0m[!]\e[0m DOMU not found in %s. Adding with default schedule\n" "$SCHED_CONFIG"
 			update_sched add "$2" 256
 		fi
-		SCHD="$(grep "$2" "$SCHED_CONFIG"|awk '{print $2}')"
+		SCHD="$(grep -w "$2" "$SCHED_CONFIG"|awk '{print $2}')"
 		sed -i "$(grep -nw "$2" < "$SCHED_CONFIG"| tr ':' ' '|awk '{print $1}'|head -1)s/.*/$2\t$SCHD\t0/" "$SCHED_CONFIG"
 	fi
 	while read -r i; do
